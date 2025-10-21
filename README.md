@@ -72,7 +72,7 @@ BetterLingo is a mobile-first language learning application that uses AI-powered
 
 1. Navigate to the project directory:
 ```bash
-cd /home/victor-nabasu/Documents/Projects/Hackathons/BetterLingo2
+cd /path/to/BetterLingo2
 ```
 
 2. Install dependencies:
