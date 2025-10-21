@@ -31,3 +31,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# documentation (exclude README.md and essential setup docs)
+BUGFIXES.md
+COMPREHENSIVE_UPDATES.md
+DATABASE.md
+DEVELOPMENT.md
+FIXES_OCTOBER_12.md
+LLM_IMPLEMENTATION.md
+NEXT_STEPS.md
+PRODUCTION_SETUP.md
+PROJECT_SUMMARY.md
+SETUP_COMPLETE.md
+SYSTEM_MESSAGES_IMPLEMENTATION.md
+UPDATES_OCT_20.md

@@ -17,7 +17,11 @@ export default function VoiceLessonPage({ params }: { params: { languageId: stri
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
   const [audioLevels, setAudioLevels] = useState([20, 30, 25, 35, 28]);
-  const [recordingTimer, setRecordingTimer] = useState<NodeJS.Timeout | null>(null);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<any[]>([]);
+  const [silenceTimer, setSilenceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
 
   useEffect(() => {
     if (!language || !lesson) {
@@ -41,54 +45,186 @@ export default function VoiceLessonPage({ params }: { params: { languageId: stri
     };
   }, [isAISpeaking]);
 
-  // Cleanup recording timer on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (recordingTimer) {
-        clearTimeout(recordingTimer);
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+      }
+      if (audioContext) {
+        audioContext.close();
       }
     };
-  }, [recordingTimer]);
+  }, [silenceTimer, audioContext]);
 
-  const handleMicToggle = () => {
+  const handleMicToggle = async () => {
     if (isRecording) {
       // Stop recording manually
       setIsRecording(false);
-      if (recordingTimer) {
-        clearTimeout(recordingTimer);
-        setRecordingTimer(null);
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        setSilenceTimer(null);
       }
       
-      // Wait a short moment before AI starts speaking
-      setTimeout(() => {
-        setIsAISpeaking(true);
-        
-        // Simulate AI response
-        setTimeout(() => {
-          setIsAISpeaking(false);
-        }, 3000);
-      }, 500);
+      // Stop the media recorder
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      
+      // Close audio context
+      if (audioContext) {
+        audioContext.close();
+        setAudioContext(null);
+      }
     } else {
       // Start recording
-      setIsRecording(true);
-      
-      // Auto-stop recording after 10 seconds
-      const timer = setTimeout(() => {
-        setIsRecording(false);
-        setRecordingTimer(null);
-        
-        // Wait a short moment before AI starts speaking
-        setTimeout(() => {
-          setIsAISpeaking(true);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+
+        recorder.onstop = async () => {
+          const audioBlob = new Blob(chunks, { type: 'audio/webm' });
           
-          // Simulate AI response
-          setTimeout(() => {
-            setIsAISpeaking(false);
-          }, 3000);
-        }, 500);
-      }, 10000);
+          // Stop all tracks
+          stream.getTracks().forEach(track => track.stop());
+          
+          // Send to API
+          await sendAudioToAPI(audioBlob);
+        };
+
+        recorder.start();
+        setMediaRecorder(recorder);
+        setIsRecording(true);
+        
+        // ✅ Set up silence detection instead of fixed timer
+        const context = new AudioContext();
+        const source = context.createMediaStreamSource(stream);
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+        
+        setAudioContext(context);
+        
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        
+        let silenceStart = Date.now();
+        const SILENCE_THRESHOLD = 10; // Volume threshold (0-255)
+        const SILENCE_DURATION = 2000; // Stop after 2 seconds of silence
+        
+        const checkAudioLevel = () => {
+          if (!recorder || recorder.state === 'inactive') return;
+          
+          analyser.getByteTimeDomainData(dataArray);
+          
+          // Calculate average volume
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            const value = Math.abs(dataArray[i] - 128);
+            sum += value;
+          }
+          const average = sum / bufferLength;
+          
+          if (average < SILENCE_THRESHOLD) {
+            // Silence detected
+            if (Date.now() - silenceStart > SILENCE_DURATION) {
+              // Stop recording after prolonged silence
+              console.log('Auto-stopping due to silence');
+              if (recorder.state === 'recording') {
+                recorder.stop();
+              }
+              setIsRecording(false);
+              if (context) {
+                context.close();
+              }
+              return;
+            }
+          } else {
+            // Sound detected, reset silence timer
+            silenceStart = Date.now();
+          }
+          
+          // Continue checking
+          const timer = setTimeout(checkAudioLevel, 100);
+          setSilenceTimer(timer);
+        };
+        
+        // Start monitoring
+        checkAudioLevel();
+      } catch (error) {
+        console.error('Error accessing microphone:', error);
+        alert('Could not access microphone. Please grant permission.');
+      }
+    }
+  };
+
+  const sendAudioToAPI = async (audioBlob: Blob) => {
+    try {
+      // Get session from localStorage
+      const sessionData = localStorage.getItem('session');
+      let userId = 'demo-user';
+      let sessionToken = 'demo-token';
+
+      if (sessionData) {
+        const session = JSON.parse(sessionData);
+        userId = session.user.id;
+        sessionToken = session.session.token;
+      }
+
+      // Create form data
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+      formData.append('languageId', languageId);
+      formData.append('lessonId', lessonId);
+      formData.append('userId', userId);
+      formData.append('sessionToken', sessionToken);
+      formData.append('conversationHistory', JSON.stringify(conversationHistory));
+
+      // Wait a short moment before showing AI speaking state
+      setTimeout(() => {
+        setIsAISpeaking(true);
+      }, 500);
+
+      // Call API
+      const response = await fetch('/api/llm/voice', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to process voice input');
+      }
+
+      const data = await response.json();
+
+      // Update conversation history
+      setConversationHistory(prev => [
+        ...prev,
+        { role: 'user', content: data.userText },
+        { role: 'assistant', content: data.message },
+      ]);
+
+      // Speak the response using browser TTS with proper language code
+      const utterance = new SpeechSynthesisUtterance(data.message);
+      utterance.lang = language?.voiceCode || 'en-US'; // Use the proper voice code for the language
+      utterance.rate = 0.9; // Slightly slower for learners
+      utterance.onend = () => {
+        setIsAISpeaking(false);
+      };
       
-      setRecordingTimer(timer);
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.error('Error processing voice input:', error);
+      setIsAISpeaking(false);
+      alert('Error processing voice input. Please try again.');
     }
   };
 

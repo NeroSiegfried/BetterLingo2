@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { languages } from '@/lib/languages';
 import BottomNav from '@/components/BottomNav';
@@ -8,7 +8,10 @@ import BottomNav from '@/components/BottomNav';
 interface Word {
   id: string;
   word: string;
-  translation: string;
+  translation: string | null;
+  status: string;
+  timesUsed: number;
+  timesSeen: number;
   isWeakness?: boolean;
 }
 
@@ -17,24 +20,53 @@ export default function WordBankPage({ params }: { params: { languageId: string 
   const { languageId } = params;
   const language = languages.find(lang => lang.id === languageId);
 
-  // Mock word data
-  const [words] = useState<Word[]>([
-    { id: '1', word: 'Hello', translation: 'Hola', isWeakness: false },
-    { id: '2', word: 'Goodbye', translation: 'Adiós', isWeakness: false },
-    { id: '3', word: 'Coffee', translation: 'Café', isWeakness: true },
-    { id: '4', word: 'Water', translation: 'Agua', isWeakness: false },
-    { id: '5', word: 'Restaurant', translation: 'Restaurante', isWeakness: true },
-    { id: '6', word: 'Please', translation: 'Por favor', isWeakness: false },
-    { id: '7', word: 'Thank you', translation: 'Gracias', isWeakness: false },
-    { id: '8', word: 'Yesterday', translation: 'Ayer', isWeakness: true },
-  ]);
+  const [words, setWords] = useState<Word[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchWords();
+  }, [languageId]);
+
+  const fetchWords = async () => {
+    try {
+      setLoading(true);
+      const sessionData = localStorage.getItem('session');
+      
+      if (!sessionData) {
+        setError('Please log in to view your word bank');
+        setLoading(false);
+        return;
+      }
+
+      const session = JSON.parse(sessionData);
+      
+      const response = await fetch(`/api/wordbank/${languageId}`, {
+        headers: {
+          'Authorization': `Bearer ${session.session.token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch words');
+      }
+
+      const data = await response.json();
+      setWords(data.words || []);
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching words:', err);
+      setError('Failed to load word bank');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handlePronounce = (word: string) => {
-    // TODO: Implement text-to-speech
-    console.log('Pronouncing:', word);
     if ('speechSynthesis' in window) {
       const utterance = new SpeechSynthesisUtterance(word);
-      utterance.lang = language?.countryCode === 'ES' ? 'es-ES' : 'en-US';
+      utterance.lang = language?.voiceCode || 'en-US';
+      utterance.rate = 0.8; // Slower for learning
       speechSynthesis.speak(utterance);
     }
   };
@@ -59,22 +91,59 @@ export default function WordBankPage({ params }: { params: { languageId: string 
       {/* Main Content */}
       <div className="pt-16 px-4">
         <div className="max-w-2xl mx-auto py-6">
-          <h2 className="text-2xl font-bold mb-6 text-indigo-dye">{words.length} words</h2>
-          
-          <div className="space-y-3">
-            {words.map((word) => (
-              <div
-                key={word.id}
-                className={`bg-white rounded-lg p-4 flex items-center justify-between border ${
-                  word.isWeakness ? 'border-orange bg-orange-900' : 'border-lapis-400'
-                }`}
+          {loading ? (
+            <div className="text-center text-white py-8">Loading words...</div>
+          ) : error ? (
+            <div className="text-center text-orange py-8">{error}</div>
+          ) : words.length === 0 ? (
+            <div className="text-center text-white py-8">
+              <p className="mb-4">No words yet! Start learning to build your word bank.</p>
+              <button
+                onClick={() => router.push(`/course/${languageId}`)}
+                className="px-6 py-2 bg-orange text-white rounded-lg hover:bg-orange-600"
               >
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-indigo-dye">{word.word}</h3>
-                  <p className="text-lapis-500">{word.translation}</p>
-                  {word.isWeakness && (
-                    <span className="inline-block mt-1 text-xs bg-orange text-white px-2 py-1 rounded">
-                      Needs practice
+                Start Learning
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-white">My Words: {words.length}</h2>
+                <button
+                  onClick={fetchWords}
+                  className="px-4 py-2 bg-indigo-dye text-white rounded-lg hover:bg-indigo-dye-600"
+                >
+                  ↻ Refresh
+                </button>
+              </div>
+              
+              <div className="space-y-3">
+                {words.map((word) => (
+                  <div
+                    key={word.id}
+                    className={`bg-white rounded-lg p-4 flex items-center justify-between border-2 ${
+                      word.status === 'active' ? 'border-green' : 'border-lapis-400'
+                    }`}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-xl font-bold text-indigo-dye">{word.word}</h3>
+                        <span className={`text-xs px-2 py-1 rounded font-semibold ${
+                          word.status === 'active' ? 'bg-green text-white' : 'bg-lapis-400 text-white'
+                        }`}>
+                          {word.status === 'active' ? '✓ Active' : '○ Passive'}
+                        </span>
+                      </div>
+                      {word.translation && (
+                        <p className="text-base text-lapis-700 mb-2">→ {word.translation}</p>
+                      )}
+                      <div className="flex gap-4 text-xs text-lapis-500">
+                        <span>🗣 Used: {word.timesUsed}x</span>
+                        <span>👁 Seen: {word.timesSeen}x</span>
+                      </div>
+                      {word.timesUsed === 0 && word.status === 'passive' && (
+                        <span className="inline-block mt-2 text-xs bg-orange text-white px-2 py-1 rounded">
+                          Try using this word!
                     </span>
                   )}
                 </div>
@@ -88,19 +157,23 @@ export default function WordBankPage({ params }: { params: { languageId: string 
                 </button>
               </div>
             ))}
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* Practice Button Above Bottom Nav */}
-      <div className="fixed left-0 right-0 bg-lapis-300 border-t border-lapis-500 px-6 py-3 z-20 flex justify-center" style={{ bottom: '64px' }}>
-        <button
-          onClick={handlePractice}
-          className="w-full max-w-md py-3 bg-orange text-white font-semibold rounded-lg hover:bg-orange-600"
-        >
-          Practice
-        </button>
-      </div>
+      {words.length >= 3 && (
+        <div className="fixed left-0 right-0 bg-lapis-300 border-t border-lapis-500 px-6 py-3 z-20 flex justify-center" style={{ bottom: '64px' }}>
+          <button
+            onClick={handlePractice}
+            className="w-full max-w-md py-3 bg-orange text-white font-semibold rounded-lg hover:bg-orange-600 shadow-lg"
+          >
+            Practice
+          </button>
+        </div>
+      )}
 
       {/* Bottom Navbar */}
       <BottomNav languageId={languageId} />

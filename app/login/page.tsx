@@ -40,11 +40,34 @@ export default function LoginPage() {
       return;
     }
 
-    // TODO: Implement actual API call
-    console.log('Login data:', formData);
-    
-    // For now, simulate success and redirect
-    router.push('/courses');
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrors({ email: data.error || 'Login failed. Please try again.' });
+        return;
+      }
+
+      // Save session to localStorage
+      localStorage.setItem('session', JSON.stringify(data));
+
+      // Redirect to courses
+      router.push('/courses');
+    } catch (error) {
+      console.error('Login error:', error);
+      setErrors({ email: 'An error occurred. Please try again.' });
+    }
   };
 
   return (

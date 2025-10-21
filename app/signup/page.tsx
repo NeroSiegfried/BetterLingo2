@@ -54,14 +54,35 @@ export default function SignupPage() {
       return;
     }
 
-    // TODO: Implement actual API call
-    console.log('Signup data:', formData);
-    
-    // For now, simulate success and redirect
-    alert('A confirmation email has been sent to ' + formData.email);
-    // In production, you'd wait for email confirmation
-    // For demo purposes, redirect to courses
-    router.push('/courses');
+    try {
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          name: formData.name || undefined,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrors({ email: data.error || 'Signup failed. Please try again.' });
+        return;
+      }
+
+      // Save session to localStorage
+      localStorage.setItem('session', JSON.stringify(data));
+
+      // Redirect to courses
+      router.push('/courses');
+    } catch (error) {
+      console.error('Signup error:', error);
+      setErrors({ email: 'An error occurred. Please try again.' });
+    }
   };
 
   return (

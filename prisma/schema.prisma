@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String           @id @default(cuid())
+  email     String           @unique
+  name      String?
+  password  String
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  progress  LessonProgress[]
+  sessions  Session[]
+  courses   UserCourse[]
+  wordBanks WordBank[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model WordBank {
+  id          String   @id @default(cuid())
+  userId      String
+  languageId  String
+  word        String
+  translation String?
+  romaji      String?
+  status      String
+  timesUsed   Int      @default(0)
+  timesSeen   Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, languageId, word])
+  @@index([userId, languageId])
+}
+
+model LessonProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  languageId  String
+  lessonId    Int
+  status      String
+  score       Int?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, languageId, lessonId])
+  @@index([userId, languageId])
+}
+
+model UserCourse {
+  id         String   @id @default(cuid())
+  userId     String
+  languageId String
+  level      String   @default("beginner")
+  enrolledAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, languageId])
+  @@index([userId])
+}

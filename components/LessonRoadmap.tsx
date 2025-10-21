@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lesson } from '@/lib/lessons';
 
+interface TooltipState {
+  show: boolean;
+  lesson: Lesson | null;
+  x: number;
+  y: number;
+}
+
 interface LessonRoadmapProps {
   lessons: Lesson[];
   languageId: string;
@@ -15,6 +22,8 @@ export default function LessonRoadmap({ lessons, languageId }: LessonRoadmapProp
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [buttonPositions, setButtonPositions] = useState<{ x: number; y: number }[]>([]);
   const [currentLessonIndex, setCurrentLessonIndex] = useState(-1);
+  const [tooltip, setTooltip] = useState<TooltipState>({ show: false, lesson: null, x: 0, y: 0 });
+  const tooltipTimeout = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Calculate button positions after render
@@ -49,6 +58,29 @@ export default function LessonRoadmap({ lessons, languageId }: LessonRoadmapProp
     if (lesson.status !== 'locked') {
       router.push(`/lesson/${languageId}/${lesson.id}?type=${lesson.type}`);
     }
+  };
+
+  const handleMouseEnter = (lesson: Lesson, event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    
+    if (containerRect) {
+      tooltipTimeout.current = setTimeout(() => {
+        setTooltip({
+          show: true,
+          lesson,
+          x: rect.left - containerRect.left + rect.width / 2,
+          y: rect.top - containerRect.top,
+        });
+      }, 300); // 300ms delay before showing
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (tooltipTimeout.current) {
+      clearTimeout(tooltipTimeout.current);
+    }
+    setTooltip({ show: false, lesson: null, x: 0, y: 0 });
   };
 
   const getStatusColor = (status: string) => {
@@ -134,6 +166,8 @@ export default function LessonRoadmap({ lessons, languageId }: LessonRoadmapProp
                   buttonRefs.current[index] = el;
                 }}
                 onClick={() => handleLessonClick(lesson)}
+                onMouseEnter={(e) => handleMouseEnter(lesson, e)}
+                onMouseLeave={handleMouseLeave}
                 disabled={lesson.status === 'locked'}
                 className={`flex flex-col items-center ${
                   lesson.status === 'locked' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
@@ -154,9 +188,6 @@ export default function LessonRoadmap({ lessons, languageId }: LessonRoadmapProp
                 </div>
                 <div className="mt-2 text-center max-w-[120px]">
                   <div className="font-semibold text-sm text-indigo-dye">{lesson.title}</div>
-                  {lesson.scenario && (
-                    <div className="text-xs text-lapis-600 mt-1">{lesson.scenario}</div>
-                  )}
                   {lesson.type !== 'checkpoint' && (
                     <div className="text-xs text-lapis-500 mt-1">
                       {lesson.type === 'text' ? 'Text Chat' : 'Voice Chat'}
@@ -168,6 +199,98 @@ export default function LessonRoadmap({ lessons, languageId }: LessonRoadmapProp
           );
         })}
       </div>
+
+      {/* Tooltip Popup */}
+      {tooltip.show && tooltip.lesson && (() => {
+        // Calculate tooltip position with bounds checking
+        const tooltipWidth = 320; // max-w-xs is roughly 320px
+        const tooltipHeight = 200; // approximate height
+        const margin = 16; // safe margin from edges
+        
+        // Get viewport dimensions
+        const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1000;
+        const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 1000;
+        
+        // Calculate initial position
+        let left = tooltip.x;
+        let top = tooltip.y - 20;
+        let translateX = '-50%';
+        let translateY = '-100%';
+        
+        // Check horizontal bounds
+        const leftEdge = tooltip.x - tooltipWidth / 2;
+        const rightEdge = tooltip.x + tooltipWidth / 2;
+        
+        if (leftEdge < margin) {
+          // Too far left, align to left edge
+          left = margin;
+          translateX = '0%';
+        } else if (rightEdge > viewportWidth - margin) {
+          // Too far right, align to right edge
+          left = viewportWidth - margin;
+          translateX = '-100%';
+        }
+        
+        // Check vertical bounds
+        if (tooltip.y - tooltipHeight < margin) {
+          // Too close to top, show below button instead
+          top = tooltip.y + 40;
+          translateY = '0%';
+        }
+        
+        return (
+          <div
+            className="absolute z-50 pointer-events-none transition-opacity duration-200"
+            style={{
+              left: `${left}px`,
+              top: `${top}px`,
+              transform: `translate(${translateX}, ${translateY})`,
+            }}
+          >
+            <div className="bg-lapis border-2 border-indigo-dye rounded-lg shadow-2xl p-4 max-w-xs">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-8 h-8 rounded-full bg-orange flex items-center justify-center">
+                  <span className="text-sm font-bold text-white">{tooltip.lesson.id}</span>
+                </div>
+                <h3 className="font-bold text-white">{tooltip.lesson.title}</h3>
+              </div>
+              {tooltip.lesson.scenario && (
+                <p className="text-sm text-lapis-300 leading-relaxed">
+                  {tooltip.lesson.scenario}
+                </p>
+              )}
+              <div className="mt-2 text-xs text-orange font-semibold">
+                {tooltip.lesson.type === 'checkpoint' ? 'Review Checkpoint' : 
+                 tooltip.lesson.type === 'text' ? 'Text Lesson' : 'Voice Lesson'}
+              </div>
+            </div>
+            {/* Arrow pointer - hide if tooltip is shown below */}
+            {translateY === '-100%' && (
+              <div 
+                className="absolute left-1/2 transform -translate-x-1/2 w-0 h-0"
+                style={{
+                  borderLeft: '8px solid transparent',
+                  borderRight: '8px solid transparent',
+                  borderTop: '8px solid #1e3a5f',
+                  bottom: '-8px',
+                }}
+              />
+            )}
+            {/* Arrow pointer - show at top if tooltip is below */}
+            {translateY === '0%' && (
+              <div 
+                className="absolute left-1/2 transform -translate-x-1/2 w-0 h-0"
+                style={{
+                  borderLeft: '8px solid transparent',
+                  borderRight: '8px solid transparent',
+                  borderBottom: '8px solid #1e3a5f',
+                  top: '-8px',
+                }}
+              />
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
